@@ -18,13 +18,14 @@ jobs:
           test-environment: 'true'
           save-tools-cache: 'false'
           save-python-cache: 'false'
-      - name: Variant A/B on Git bash spawns
+      - name: Real replay A/B
         shell: bash
         run: |
           set -u
-          file "$(command -v bash)" 2>/dev/null || true
-          for round in 1 2; do
-            for mode in msys-forks native-python python3-name python-name procsub-find heredoc-python3; do
-              python .github/probe/spawn_ab.py "$mode" 800 32 || true
-            done
+          for kind in simple upgrade winupdate; do
+            python .github/probe/real_ab.py threads $kind 600 || true
+            pids=()
+            for i in $(seq 1 16); do python .github/probe/real_ab.py procs $kind 40 & pids+=($!); done
+            for p in "${pids[@]}"; do wait $p || true; done
+            echo "---- procs $kind done"
           done
