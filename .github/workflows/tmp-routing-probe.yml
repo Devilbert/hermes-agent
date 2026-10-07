@@ -18,12 +18,13 @@ jobs:
           test-environment: 'true'
           save-tools-cache: 'false'
           save-python-cache: 'false'
-      - name: Env A/B on Git bash spawns
+      - name: Variant A/B on Git bash spawns
         shell: bash
         run: |
           set -u
-          for round in 1 2 3; do
-            for mode in minimal minimal+windows; do
-              python .github/probe/spawn_ab.py "$mode" 1500 32 || true
+          file "$(command -v bash)" 2>/dev/null || true
+          for round in 1 2; do
+            for mode in msys-forks native-python python3-name python-name procsub-find heredoc-python3; do
+              python .github/probe/spawn_ab.py "$mode" 800 32 || true
             done
           done

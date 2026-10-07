@@ -1,25 +1,31 @@
-"""Spawn Git bash many times from W parallel workers per env variant; count non-zero exits."""
-import os, subprocess, sys, tempfile, collections
+"""Run Git bash W-wide in parallel over script variants; count crashes (non-zero) per variant."""
+import collections, os, platform, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from hermes_platform.resolver import locate_command
+
+sys.path.insert(0, os.getcwd())
+from tests.ci import workflow_steps
 
 bash = locate_command("bash").command[0]
 git = locate_command("git").command[0]
-interp = os.path.dirname(sys.executable)
-SCRIPT = 'record() { :; }\nx=$(printf a | tr a b)\n[ "$x" = b ]\nif false; then echo no; fi\n'
-d = tempfile.mkdtemp(prefix="ab-")
-script = os.path.join(d, "s.sh"); open(script, "w", encoding="utf-8").write(SCRIPT)
-base = {"PATH": os.pathsep.join((interp, os.defpath, os.path.dirname(bash), os.path.dirname(git))),
-        "HOME": d, "RUNNER_TEMP": d}
-win = {k: os.environ[k] for k in os.environ if k.upper() in (
-    "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE", "TEMP", "TMP", "PROGRAMDATA",
-    "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS", "USERPROFILE", "LOCALAPPDATA", "APPDATA")}
-print("bash:", bash, "win keys:", sorted(win))
-variants = {"minimal": base, "minimal+windows": {**base, **win}}
-mode = sys.argv[1]; n = int(sys.argv[2]); workers = int(sys.argv[3])
-env = variants[mode]
+print("python:", sys.executable, platform.machine(), platform.python_version())
+VARIANTS = {
+    "msys-forks": 'x=$(printf a | tr a b)\n[ "$x" = b ]\n',
+    "native-python": '"$REPLAY_PYTHON" -c pass\n',
+    "python3-name": 'python3 -c pass\n',
+    "python-name": 'python -c pass\n',
+    "procsub-find": "mapfile -t f < <(find tests/e2e/core/upgrade -maxdepth 1 -name 'test_*.py' | sort)\n[ ${#f[@]} -gt 0 ]\n",
+    "heredoc-python3": "x=$(python3 - <<'PY'\nprint(1)\nPY\n)\n[ \"$x\" = 1 ]\n",
+}
+mode, n, workers = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+root = Path(tempfile.mkdtemp(prefix="ab-"))
+dirs = workflow_steps._interpreter_dirs(root)
+script = root / "s.sh"; script.write_text(VARIANTS[mode], encoding="utf-8")
+env = {"PATH": os.pathsep.join((*dirs, os.defpath, str(Path(bash).parent), str(Path(git).parent))),
+       "HOME": str(root), "RUNNER_TEMP": str(root), "REPLAY_PYTHON": sys.executable}
 def one(_):
-    r = subprocess.run([bash, "--noprofile", "--norc", "-eo", "pipefail", script], cwd=d, env=env,
+    r = subprocess.run([bash, "--noprofile", "--norc", "-eo", "pipefail", str(script)], cwd=os.getcwd(), env=env,
                        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
     return r.returncode
 with ThreadPoolExecutor(workers) as ex:
